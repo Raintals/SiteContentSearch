@@ -20,6 +20,7 @@ def ensure_collection(collection_name, dim=768):
         FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, auto_id=False),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
         FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+        FieldSchema(name="html", dtype=DataType.VARCHAR, max_length=65535),  # Add HTML field
         FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=2048),
         FieldSchema(name="chunk_index", dtype=DataType.INT64),
     ]
@@ -36,7 +37,7 @@ def ensure_collection(collection_name, dim=768):
     return coll
 
 
-def insert_chunks(collection, embeddings: np.ndarray, texts, url):
+def insert_chunks(collection, embeddings: np.ndarray, chunks, url):
     """
     Insert unique chunks into Milvus collection.
     Prevent duplicates based on text.
@@ -48,12 +49,16 @@ def insert_chunks(collection, embeddings: np.ndarray, texts, url):
         existing_texts = set()
 
     filtered_texts = []
+    filtered_htmls = []
     filtered_embeddings = []
     filtered_chunk_indices = []
 
-    for i, t in enumerate(texts):
+    for i, chunk in enumerate(chunks):
+        t = chunk["text"]
+        h = chunk["html"]
         if t not in existing_texts:
             filtered_texts.append(t)
+            filtered_htmls.append(h)
             filtered_embeddings.append(embeddings[i])
             filtered_chunk_indices.append(i)
 
@@ -63,7 +68,14 @@ def insert_chunks(collection, embeddings: np.ndarray, texts, url):
     n = len(filtered_texts)
     pks = list(range(int(time.time()*1000), int(time.time()*1000) + n))
 
-    collection.insert([pks, np.array(filtered_embeddings).tolist(), filtered_texts, [url]*n, filtered_chunk_indices])
+    collection.insert([
+        pks,
+        np.array(filtered_embeddings).tolist(),
+        filtered_texts,
+        filtered_htmls,
+        [url]*n,
+        filtered_chunk_indices
+    ])
     collection.load()
     return pks
 
@@ -74,17 +86,19 @@ def search_collection(collection, query_emb, top_k=10):
     """
     search_params = {"metric_type": "IP", "params": {"ef": 128}}
     res = collection.search([query_emb.tolist()], "embedding", param=search_params, limit=top_k*3,
-                            output_fields=["text", "chunk_index"])
+                            output_fields=["text", "html", "chunk_index"])
 
     seen_texts = set()
     hits = []
     for hits_list in res:
         for h in hits_list:
             text = h.entity.get("text")
+            html = h.entity.get("html")
             if text not in seen_texts:
                 hits.append({
                     "score": float(h.distance),
                     "text": text,
+                    "html": html,
                     "chunk_index": h.entity.get("chunk_index")
                 })
                 seen_texts.add(text)

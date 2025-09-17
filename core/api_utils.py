@@ -27,33 +27,44 @@ def extract_text_blocks(html):
     for tag in soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"]):
         text = tag.get_text(separator=" ", strip=True)
         if text:
-            blocks.append(text)
+            blocks.append((text, str(tag)))  # Return both text and HTML
     return blocks
 
 
 def chunk_text_by_token_limit(blocks, max_tokens=500, overlap=50):
     """
     Chunk text blocks using sliding window with overlap.
+    Each block is a (text, html) tuple.
     """
     chunks = []
-    current = []
+    current_text = []
+    current_html = []
     current_len = 0
-    for block in blocks:
-        block_len = len(tokenizer.encode(block))
+    for block_text, block_html in blocks:
+        block_len = len(tokenizer.encode(block_text))
         if current_len + block_len <= max_tokens:
-            current.append(block)
+            current_text.append(block_text)
+            current_html.append(block_html)
             current_len += block_len
         else:
-            if current:
-                chunks.append(" ".join(current))
+            if current_text:
+                chunks.append({
+                    "text": " ".join(current_text),
+                    "html": "".join(current_html)
+                })
             # start new chunk with overlap
-            if overlap < len(current):
-                current = current[-overlap:] + [block]
+            if overlap < len(current_text):
+                current_text = current_text[-overlap:] + [block_text]
+                current_html = current_html[-overlap:] + [block_html]
             else:
-                current = [block]
-            current_len = sum(len(tokenizer.encode(x)) for x in current)
-    if current:
-        chunks.append(" ".join(current))
+                current_text = [block_text]
+                current_html = [block_html]
+            current_len = sum(len(tokenizer.encode(x)) for x in current_text)
+    if current_text:
+        chunks.append({
+            "text": " ".join(current_text),
+            "html": "".join(current_html)
+        })
     return chunks
 
 
